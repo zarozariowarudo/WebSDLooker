@@ -6,7 +6,10 @@
 #include "SdFat.h"
 
 #include "pins.h"
-#include "templates.h"
+
+#include "htmlTemplate.h"
+#include "cssStyle.h"
+#include "jsScript.h"
  
 // Твои настройки Wi-Fi
 const char* ssid = "TP-Link_1B4F";
