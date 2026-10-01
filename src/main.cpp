@@ -29,7 +29,8 @@ FsFile uploadFile;
 // Экранирует строку для безопасной вставки в JSON. Это НЕ лечит саму
 // причину (шум на SPI-шине бьёт байты имён файлов), а лишь не даёт одному
 // битому символу сломать JSON целиком и обнулить весь список на сайте.
-String jsonEscape(const String& in) {
+String jsonEscape(const String& in) 
+{
     String out;
     out.reserve(in.length() + 8);
     for (size_t i = 0; i < in.length(); i++) {
@@ -52,34 +53,128 @@ String jsonEscape(const String& in) {
  
 // Рекурсивный поиск файлов (SdFat API: openNext вместо openNextFile,
 // getName вместо path() - полный путь собираем вручную по мере рекурсии)
-void printDirectory(FsFile& dir, const String& basePath, String& json, bool& first) {
+// void printDirectory(FsFile& dir, const String& basePath, String& json, bool& first) {
+//     FsFile entry;
+//     while (entry.openNext(&dir, O_RDONLY)) {
+//         char nameBuf[128];
+//         entry.getName(nameBuf, sizeof(nameBuf));
+//         String fullPath = basePath + "/" + String(nameBuf);
+ 
+//         bool looksCorrupted = false;
+//         for (size_t i = 0; i < strlen(nameBuf); i++) {
+//             if ((uint8_t)nameBuf[i] < 0x20) { looksCorrupted = true; break; }
+//         }
+//         if (looksCorrupted) {
+//             Serial.printf("ВНИМАНИЕ: повреждённое имя файла в директории (шум на SPI): %s\n", fullPath.c_str());
+//         }
+ 
+//         if (entry.isDirectory()) {
+//             printDirectory(entry, fullPath, json, first);
+//         } else {
+//             if (!first) json += ",";
+//             json += "{\"name\":\"" + jsonEscape(fullPath) + "\",\"size\":" + String(entry.fileSize()) +
+//                     ",\"corrupted\":" + (looksCorrupted ? "true" : "false") + "}";
+//             first = false;
+//         }
+//         entry.close();
+//     }
+// }
+
+bool removeRecursive(const String& basePath)
+{
+    FsFile dir = sd.open(basePath);
+
+    if (!dir) return false;
+
+    if (!dir.isDirectory()) 
+    {
+        dir.close();
+        return sd.remove(basePath.c_str());
+    }
+    
     FsFile entry;
-    while (entry.openNext(&dir, O_RDONLY)) {
+    while(entry.openNext(&dir, O_RDONLY))
+    {
         char nameBuf[128];
         entry.getName(nameBuf, sizeof(nameBuf));
-        String fullPath = basePath + "/" + String(nameBuf);
- 
+
+        String path = basePath;
+        if (!path.endsWith("/")) path += "/";
+        path += String(nameBuf);
+
+        bool isDir = entry.isDirectory();
+        entry.close();
+
+        if (isDir)
+        {
+            if (!removeRecursive(path))
+            {
+                dir.close();
+                return false;
+            }
+        }
+        else
+        {
+            if (!sd.remove(path.c_str()))
+            {
+                dir.close();
+                return false;
+            }
+        }
+    }
+    dir.close();
+
+    return sd.rmdir(basePath.c_str());
+}
+
+void PrintDirectory(const String& path)
+{ 
+    FsFile dir = sd.open(path);
+    if (!dir || !dir.isDirectory())
+    {
+        server.send(400, "application/json", "{\"error\":\"Not a directory\"}");
+        return;
+    }
+
+    FsFile entry;
+    String json = "[";
+    bool first = true;
+
+    while(entry.openNext(&dir, O_RDONLY))
+    {
+        char nameBuf[128];
+        entry.getName(nameBuf, sizeof(nameBuf));
+        String fileName = String(nameBuf); 
+
+        String fullPath = path;
+        if (!fullPath.endsWith("/")) fullPath += "/";
+                fullPath += fileName;
+
         bool looksCorrupted = false;
-        for (size_t i = 0; i < strlen(nameBuf); i++) {
-            if ((uint8_t)nameBuf[i] < 0x20) { looksCorrupted = true; break; }
-        }
-        if (looksCorrupted) {
+        for (size_t i = 0; i < strlen(nameBuf); i++) 
+            if ((uint8_t)nameBuf[i] < 0x20) { looksCorrupted = true; break; } 
+
+        if (looksCorrupted)
             Serial.printf("ВНИМАНИЕ: повреждённое имя файла в директории (шум на SPI): %s\n", fullPath.c_str());
-        }
- 
-        if (entry.isDirectory()) {
-            printDirectory(entry, fullPath, json, first);
-        } else {
-            if (!first) json += ",";
-            json += "{\"name\":\"" + jsonEscape(fullPath) + "\",\"size\":" + String(entry.fileSize()) +
-                    ",\"corrupted\":" + (looksCorrupted ? "true" : "false") + "}";
-            first = false;
-        }
+
+        if (!first) json += ",";
+
+        json += "{\"name\":\"" + jsonEscape(fileName) + 
+                "\",\"path\":\"" + jsonEscape(fullPath) + 
+                "\",\"size\":" + String(entry.fileSize()) +
+                ",\"corrupted\":" + (looksCorrupted ? "true" : "false") + 
+                ",\"isDir\":" + (entry.isDirectory() ? "true" : "false") + "}";
+
+        first = false;
         entry.close();
     }
+    dir.close();
+    json += "]";
+    server.send(200, "application/json", json);
 }
  
-void handleUpload() {
+void handleUpload() 
+{
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
         // Отключаем Nagle и держим соединение "живым" на время долгой заливки
@@ -146,15 +241,8 @@ void readSD()
 
 void handleList()
 {
-    String json = "[";
-    FsFile root = sd.open("/");
-    if (root) {
-        bool first = true;
-        printDirectory(root, "", json, first);
-        root.close();
-    }
-    json += "]";
-    server.send(200, "application/json", json);
+    String path = server.hasArg("dir") ? server.arg("dir") : "/";
+    PrintDirectory(path);
 }
 
 void handleDownload()
@@ -234,14 +322,30 @@ void handleDownload()
 
 void handleDeletion()
 {
-    if (server.hasArg("file")) {
-        String path = server.arg("file");
-        if (sd.remove(path.c_str())) {
-            server.send(200, "text/plain", "OK");
-        } else {
-            server.send(500, "text/plain", "Failed");
-        }
+    if (!server.hasArg("file") && !server.hasArg("path")) 
+    {
+        server.send(400, "text/plain", "Bad Request: Missing 'path' parameter");
+        return;
     }
+
+    String path = server.hasArg("path") ? server.arg("path") : server.arg("file");
+
+    if (path == "/" || path.isEmpty())
+    {
+        server.send(403, "text/plain", "Forbidden: Cannot delete root directory");
+        return;
+    }
+
+    if (!sd.exists(path.c_str()))
+    {
+        server.send(404, "text/plain", "File or Directory Not Found");
+        return;
+    }
+
+    if (removeRecursive(path))
+        server.send(200, "text/plain", "OK");
+    else
+        server.send(500, "text/plain", "Failed to delete item");
 }
 
 void handleRename()
@@ -255,6 +359,27 @@ void handleRename()
     }
 }
 
+void handleMKDIR()
+{
+    if (!server.hasArg("path"))
+    {
+        server.send(400, "text/plain", "Missing path argument");
+        return;
+    }
+
+    String path = server.arg("path");
+
+    if (path == "/" || path.isEmpty())
+    {
+        server.send(400, "text/plain", "Invalid path");
+        return;
+    }
+
+    if (sd.mkdir(path.c_str()))
+        server.send(200, "text/plain", "ok");
+    else
+        server.send(500, "text/plain", "Failed to create a directory");
+}
 void handleServerMethods()
 {
     server.on("/", HTTP_GET, []
@@ -273,6 +398,8 @@ void handleServerMethods()
     server.on("/delete", HTTP_DELETE, handleDeletion);
  
     server.on("/rename", HTTP_POST, handleRename);
+
+    server.on("/mkdir", HTTP_POST, handleMKDIR);
  
     server.on("/upload", HTTP_POST, []() { // handle upload file
         server.send(200, "text/plain", "OK");
@@ -280,7 +407,8 @@ void handleServerMethods()
 
 }
 
-void setup() {
+void setup() 
+{
     Serial.begin(115200);
     delay(200);
     Serial.println("\n--- Запуск ESP32 SD Web Server (SdFat) ---");
@@ -297,12 +425,12 @@ void setup() {
     // ДИАГНОСТИКА: встроенный листинг SdFat в обход нашего кода /list -
     // если файлы тут видны, значит данные на карте целы, а баг в printDirectory
     Serial.println("--- Встроенный листинг SdFat (ls -R) ---");
-    sd.ls(&Serial, "/", LS_R | LS_SIZE | LS_DATE);
+    // sd.ls(&Serial, "/", LS_R | LS_SIZE | LS_DATE);
     Serial.println("--- Конец листинга ---");
  
     // Контрольный тест: читаем файл целиком ДО запуска Wi-Fi той же
     // проблемной точкой (8192 байт), которая ломала встроенную SD.h
-    readSD();
+    // readSD();
  
     WiFi.begin(ssid, password);
     Serial.print("Подключение к Wi-Fi ");
@@ -324,6 +452,7 @@ void setup() {
     Serial.println("Веб-сервер запущен и готов к работе.");
 }
  
-void loop() {
+void loop() 
+{
     server.handleClient();
 }

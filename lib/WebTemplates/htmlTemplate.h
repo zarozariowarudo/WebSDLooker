@@ -14,10 +14,19 @@ inline const char* htmlTemplate = R"rawliteral(
         <h2>📂 ESP32 SD File Manager</h2>
         
         <div class="upload-box">
-            <h3>Загрузить файл на SD-карту</h3>
-            <input type="file" id="fileInput"><br>
-            <button onclick="uploadFile()">Загрузить</button>
-            <div id="status"></div>
+            <div class="FileUploadBox">
+                <h3>Загрузить файл на SD-карту</h3>
+                <input type="file" id="fileInput">
+                <button onclick="uploadFile()">Загрузить</button>
+                <div id="status1"></div>
+            </div>
+            <div class="FolderUploadBox">
+                <h3>Добавить папку на SD-карту</h3>
+                <input type="text" id="folderInput"
+                placeholder="Имя новой папки...">
+                <button onclick="uploadFolder()">Добавить</button>
+                <div id="status2"></div>
+            </div>
         </div>
  
         <table>
