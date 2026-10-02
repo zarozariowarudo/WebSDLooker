@@ -31,7 +31,8 @@ function loadFolder(path) {
 }
 
 // 2. Функция отрисовки таблицы HTML из полученного массива
-function renderTable(items) {
+function renderTable(items) 
+{
     let tbody = document.getElementById("fileTable");
     if (!tbody) return;
     
@@ -80,7 +81,11 @@ function renderTable(items) {
         else {
             let warning = item.corrupted ? ' <span title="Шум на SPI">⚠️</span>' : '';
             tr.innerHTML = `
-                <td>📄 ${item.name}${warning}</td>
+                <td>
+                    <a href="/download?file=${encodeURIComponent(item.path)}" target="_blank" style="color: #4da6ff; text-decoration: none;">
+                            📄          ${item.name}
+                    </a>
+                </td>
                 <td>${formatBytes(item.size)}</td>
                 <td>
                     <button onclick="downloadFile('${item.path}')">⬇️</button>
@@ -95,7 +100,7 @@ function renderTable(items) {
 // 3. Скачивание файла
 function downloadFile(path) {
     // Просто перенаправляем браузер по ссылке — он сам начнет скачивание
-    window.location.href = '/download?file=' + encodeURIComponent(path);
+    window.location.href = '/download?file=' + encodeURIComponent(path) + '&dl=1';
 }
 
 // 4. Удаление (файла или папки)

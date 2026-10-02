@@ -50,35 +50,6 @@ String jsonEscape(const String& in)
     }
     return out;
 }
- 
-// Рекурсивный поиск файлов (SdFat API: openNext вместо openNextFile,
-// getName вместо path() - полный путь собираем вручную по мере рекурсии)
-// void printDirectory(FsFile& dir, const String& basePath, String& json, bool& first) {
-//     FsFile entry;
-//     while (entry.openNext(&dir, O_RDONLY)) {
-//         char nameBuf[128];
-//         entry.getName(nameBuf, sizeof(nameBuf));
-//         String fullPath = basePath + "/" + String(nameBuf);
- 
-//         bool looksCorrupted = false;
-//         for (size_t i = 0; i < strlen(nameBuf); i++) {
-//             if ((uint8_t)nameBuf[i] < 0x20) { looksCorrupted = true; break; }
-//         }
-//         if (looksCorrupted) {
-//             Serial.printf("ВНИМАНИЕ: повреждённое имя файла в директории (шум на SPI): %s\n", fullPath.c_str());
-//         }
- 
-//         if (entry.isDirectory()) {
-//             printDirectory(entry, fullPath, json, first);
-//         } else {
-//             if (!first) json += ",";
-//             json += "{\"name\":\"" + jsonEscape(fullPath) + "\",\"size\":" + String(entry.fileSize()) +
-//                     ",\"corrupted\":" + (looksCorrupted ? "true" : "false") + "}";
-//             first = false;
-//         }
-//         entry.close();
-//     }
-// }
 
 bool removeRecursive(const String& basePath)
 {
@@ -245,6 +216,21 @@ void handleList()
     PrintDirectory(path);
 }
 
+String getContentType(String filename) 
+{
+    filename.toLowerCase();
+
+    if (filename.endsWith(".html") || filename.endsWith(".htm")) return "text/html";
+    else if (filename.endsWith(".css")) return "text/css";
+    else if (filename.endsWith(".js")) return "text/javascript";
+    else if (filename.endsWith(".png")) return "image/png";
+    else if (filename.endsWith(".gif")) return "image/gif";
+    else if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) return "image/jpeg";
+    else if (filename.endsWith(".txt") || filename.endsWith(".json") || filename.endsWith(".log")) return "text/plain";
+
+    return "application/octet-stream"; // Для остальных типов файлов (бинарники, архивы и т.д.)
+}
+
 void handleDownload()
 {
     if (!server.hasArg("file")) {
@@ -271,14 +257,19 @@ void handleDownload()
     String baseName = path;
     int slashPos = baseName.lastIndexOf('/');
     if (slashPos >= 0) baseName = baseName.substring(slashPos + 1);
-    server.sendHeader("Content-Disposition", "attachment; filename=\"" + baseName + "\"");
+
+    if (server.hasArg("dl") && server.arg("dl") == "1") {
+        server.sendHeader("Content-Disposition", "attachment; filename=\"" + baseName + "\"");
+    } else {
+        server.sendHeader("Content-Disposition", "inline; filename=\"" + baseName + "\"");
+    }
 
     WiFiClient client = server.client();
     client.setNoDelay(true);
 
     size_t fileSize = dataFile.fileSize();
     server.setContentLength(fileSize);
-    server.send(200, "application/octet-stream", "");
+    server.send(200, getContentType(baseName), "");
 
     static uint8_t buf[4096];
     size_t sent = 0;
@@ -380,6 +371,7 @@ void handleMKDIR()
     else
         server.send(500, "text/plain", "Failed to create a directory");
 }
+
 void handleServerMethods()
 {
     server.on("/", HTTP_GET, []
@@ -424,9 +416,9 @@ void setup()
  
     // ДИАГНОСТИКА: встроенный листинг SdFat в обход нашего кода /list -
     // если файлы тут видны, значит данные на карте целы, а баг в printDirectory
-    Serial.println("--- Встроенный листинг SdFat (ls -R) ---");
+    // Serial.println("--- Встроенный листинг SdFat (ls -R) ---");
     // sd.ls(&Serial, "/", LS_R | LS_SIZE | LS_DATE);
-    Serial.println("--- Конец листинга ---");
+    // Serial.println("--- Конец листинга ---");
  
     // Контрольный тест: читаем файл целиком ДО запуска Wi-Fi той же
     // проблемной точкой (8192 байт), которая ломала встроенную SD.h
